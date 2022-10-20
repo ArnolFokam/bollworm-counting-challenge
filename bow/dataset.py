@@ -1,4 +1,5 @@
 import os
+import math
 import glob
 import logging
 from PIL import Image
@@ -6,8 +7,9 @@ from typing import List
 from collections import defaultdict
 
 import torch
-import pandas as pd
 import numpy as np
+import shapely.wkt
+import pandas as pd
 from tqdm import tqdm
 from dotenv import load_dotenv
 from typing import Callable, Optional
@@ -42,9 +44,6 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
         self.max_cache_length = max_cache_length
         self.class_meta = self.__load_meta_class()
         
-        # get the ids of the image in the folder
-        self.image_ids = [os.path.basename(filename).split(".")[0].split("_")[-1] for filename in glob.glob(f"{root_dir}/{self.images_path}/id_*.jpg")]
-        
         # get the bounding boxes
         if self.train:
             self.bboxes = []
@@ -52,31 +51,36 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
             
             bboxes_df = pd.read_csv(f"{self.root_dir}/{self.bbox_path}")
             
-            for name, bboxes in bboxes_df.groupby("image_id"):
-                targets = []
-                bboxes = []
-                for _, row in bboxes.iterrows():
-                    targets.append(row['worm_type'])
-                    bboxes.append(row["geometry"].bounds)
+            pbar = tqdm( bboxes_df.groupby("image_id"))
+            pbar.set_description("Getting bounding box information...")
             
+            for name, bboxes in pbar:
+                tmp_targets = []
+                tmp_bboxes = []
+                for _, row in bboxes.iterrows():
+                    if not pd.isnull(row['worm_type']):
+                        tmp_targets.append(row['worm_type'])
+                        tmp_bboxes.append(shapely.wkt.loads(row["geometry"]).bounds)
+            
+                self.bboxes.append((name, tmp_bboxes, tmp_targets))
         
         # save cache for our load on the fly algorithm
         self.cache = {}
 
         
     def __len__(self):
-        return len(self.image_ids)
+        return len(self.bboxes)
 
     def __getitem__(self, index: str):
-        image_id, bbox, target = self.image_ids[index], self.bboxes[index]if self.train else torch.empty(1), self.targets[index] if self.train else torch.empty(1)
-        image_id = np.array(self.__get_image_from_id(image_id))
+        image_id, bboxes, targets = self.bboxes[index]
+        image = np.array(self.__get_image_from_id(image_id))
         if self.transform:
             transformed = self.transform(image=image.astype(np.float32))
             image = transformed["image"].float()
         else:
             image = torch.FloatTensor(image)
 
-        return int(image_id), image, field_mask, int(self.class_meta[target]["loss_label"]) if self.train else torch.empty(1)
+        return int(image_id), image, field_mask, [int(self.class_meta[target]["loss_label"]) for target in targets] if self.train else torch.empty(len(targets))
 
     @staticmethod
     def get_class_weights(targets):

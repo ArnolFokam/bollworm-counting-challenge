@@ -51,7 +51,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
             
             bboxes_df = pd.read_csv(f"{self.root_dir}/{self.bbox_path}")
             
-            pbar = tqdm( bboxes_df.groupby("image_id"))
+            pbar = tqdm(bboxes_df.groupby("image_id"))
             pbar.set_description("Getting bounding box information...")
             
             for name, bboxes in pbar:
@@ -62,7 +62,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                         tmp_targets.append(row['worm_type'])
                         tmp_bboxes.append(shapely.wkt.loads(row["geometry"]).bounds)
             
-                self.bboxes.append((name, tmp_bboxes, tmp_targets))
+                self.bboxes.append((name.split(".")[0].split("_")[-1], tmp_bboxes, tmp_targets))
         
         # save cache for our load on the fly algorithm
         self.cache = {}

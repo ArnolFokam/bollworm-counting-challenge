@@ -1,23 +1,21 @@
-import os
-import math
 import glob
-import pickle
 import logging
-from PIL import Image
-from typing import List
+import math
+import os
+import pickle
 from collections import defaultdict
+from typing import Callable, List, Optional
 
 import cv2
-import torch
 import numpy as np
-import shapely.wkt
 import pandas as pd
-from tqdm import tqdm
+import shapely.wkt
+import torch
 from dotenv import load_dotenv
-from typing import Callable, Optional
+from PIL import Image
+from tqdm import tqdm
 
 from bow.helpers import get_dir
-
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO,
@@ -37,7 +35,6 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
             root_dir: str,
             save: bool = True,
             train: bool = True,
-            download: bool = False,
             transform: Optional[Callable] = None,
             max_cache_length: int = 256):
         

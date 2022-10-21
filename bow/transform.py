@@ -1,8 +1,9 @@
-import numpy as np
 from typing import Dict, List, Union
-from PIL.Image import Image
-import torch
+
+import numpy as np
 import scipy
+import torch
+from PIL.Image import Image
 
 
 class BaselineTrainTransform:

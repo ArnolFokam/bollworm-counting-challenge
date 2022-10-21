@@ -84,7 +84,9 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                     
                     # TODO: next time, move to cases with no bounding boxes
                     if len(tmp_bboxes) == len(tmp_bboxes) and len(tmp_bboxes) > 0 and len(tmp_targets) > 0:
-                        self.bboxes.append((name.split(".")[0].split("_")[-1], tmp_bboxes, tmp_targets))
+                        self.bboxes.append((name.split(".")[0].split("_")[-1], 
+                                            ame.split(".")[-1],
+                                            tmp_bboxes, tmp_targets))
             
             if save:
                 logging.info('Caching data for subsequent use...')
@@ -103,22 +105,24 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
         return len(self.bboxes)
 
     def __getitem__(self, index: str):
-        image_id, bboxes, targets = self.bboxes[index]
+        image_id, ext, bboxes, targets = self.bboxes[index]
         
         # image
-        image, original_height, original_width = self.__get_image_from_id(image_id)
+        image, original_height, original_width = self.__get_image_from_id(image_id, ext)
         image /= 255.0
         
         # normalize the bounding boxes
         for i in range(len(bboxes)):
-            xmin = (bboxes[i][0] / original_width) * self.width # min x
-            ymin = (bboxes[i][1] / original_height) * self.height # max x
-            xmax = (bboxes[i][2] / original_width) * self.width # min y
-            ymax = (bboxes[i][3] / original_height) * self.height # max y
+            xmax = (min(bboxes[i][2], original_width) / original_width) * self.width # min y
+            ymax = (min(bboxes[i][3], original_height) / original_height) * self.height # max y
+            
+            
+            xmin = max(xmax - (((bboxes[i][2] - bboxes[i][0]) / original_width) * self.width), 0) # min x
+            ymin = max(ymax - (((bboxes[i][3] - bboxes[i][1]) / original_height) * self.height), 0) # max x
             
             bboxes[i] = (xmin, ymin, xmax, ymax)
 
-        bboxes = torch.as_tensor(bboxes, dtype=torch.float32)
+        bboxes = torch.as_tensor(bboxes, dtype=torch.float64)
         
         if self.transform:
             image, bboxes, targets = self.transform(image=image, bboxes=bboxes, class_labels=targets)
@@ -147,12 +151,12 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
             # can load more meta if you want
         } for k, v in zip(self.bollworms, range(len(self.bollworms)))}
         
-    def __get_image_from_id(self, image_id: int):
+    def __get_image_from_id(self, image_id: int, ext: str):
         if image_id in self.cache.keys():
             # if image in cache, return the image
             return self.cache[image_id]
         else:
-            image = cv2.imread(f"{self.root_dir}/{self.images_path}/id_{image_id}.jpg")
+            image = cv2.imread(f"{self.root_dir}/{self.images_path}/id_{image_id}.{ext}")
             img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
             
             original_height, original_width = img_rgb.shape[:2]

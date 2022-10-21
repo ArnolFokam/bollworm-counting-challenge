@@ -96,10 +96,10 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
     def __getitem__(self, index: str):
         image_id, bboxes, targets = self.bboxes[index]
         image = np.array(self.__get_image_from_id(image_id))
+        
         if self.transform:
             image, bboxes, targets = self.transform(image=image.astype(np.float32), bboxes=bboxes, class_labels=targets)
             
-        print(image, bboxes, targets)
         return image_id, torch.FloatTensor(image), bboxes, [int(self.class_meta[target]["loss_label"]) for target in targets] if self.train else torch.empty(len(targets))
 
     @staticmethod
@@ -138,4 +138,3 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
 
 if __name__ == '__main__':
     ds = WadhwaniBollwormDataset('data/', train=True)
-    pass

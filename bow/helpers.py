@@ -3,8 +3,7 @@ import json
 import random
 import string
 
-import random
-
+import torch
 import cv2
 from matplotlib import pyplot as plt
 import numpy as np

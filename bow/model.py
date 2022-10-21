@@ -34,5 +34,4 @@ if __name__ == '__main__':
     
     # modelling
     model = InsectDetector()
-    print(imgs)
     out = model(imgs, masks)   

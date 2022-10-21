@@ -58,7 +58,7 @@ parser.add_argument('-w', '--num_workers',
                     help='number of workers for dataloader', default=8, type=int)
 parser.add_argument('-cs', '--crop_size',
                     help='size of the crop image after transform', default=32, type=int)
-arser.add_argument('-ml', '--max_cache_length',
+parser.add_argument('-ml', '--max_cache_length',
                     help='max length of the cache of our data', default=512, type=int)
 
 # model optimization & training

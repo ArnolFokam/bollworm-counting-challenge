@@ -95,12 +95,21 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index: str):
         image_id, bboxes, targets = self.bboxes[index]
-        image = np.array(self.__get_image_from_id(image_id))
+        
+        # bounding box
+        torch.as_tensor(boxes, dtype=torch.float32)
+        
+        # image
+        image = self.__get_image_from_id(image_id)
+        image /= 255.0
         
         if self.transform:
-            image, bboxes, targets = self.transform(image=image.astype(np.float32), bboxes=bboxes, class_labels=targets)
-            
-        return image_id, torch.FloatTensor(image), bboxes, [int(self.class_meta[target]["loss_label"]) for target in targets] if self.train else torch.empty(len(targets))
+            image, bboxes, targets = self.transform(image=image, bboxes=bboxes, class_labels=targets)
+        
+            # bounding box
+            bboxes = torch.Tensor(bboxes)
+        
+        return image_id, image, bboxes, torch.as_tensor([int(self.class_meta[target]["loss_label"]) for target in targets], dtype=torch.int64) if self.train else torch.empty(len(targets))
 
     @staticmethod
     def get_class_weights(targets):
@@ -125,14 +134,15 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
             return self.cache[image_id]
         else:
             image = cv2.imread(f"{self.root_dir}/{self.images_path}/id_{image_id}.jpg")
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+            img_res = cv2.resize(img_rgb, (self.width, self.height), cv2.INTER_AREA)
                 
             # if max cache length attain, remnove one random element
             if len(self.cache.keys()) >= self.max_cache_length:
                 del self.cache[random.choice(self.cache.keys())]
                 
             # insert next element
-            self.cache[image_id] = image
+            self.cache[image_id] = img_res
             return self.cache[image_id]
 
 

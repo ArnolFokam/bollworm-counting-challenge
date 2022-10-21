@@ -1,5 +1,9 @@
+from typing import Dict
+
 import torch
 import torch.nn as nn
+import torchvision
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 from bow.dataset import WadhwaniBollwormDataset
 from bow.transform import BaselineTrainTransform
@@ -17,12 +21,18 @@ class ModelMixin(nn.Module):
         
 
 class InsectDetector(ModelMixin):
-    def __init__(self):
+    def __init__(self, num_classes):
         super().__init__()
-        pass
-    
-    def forward():
-        raise NotImplementedError
+        self.backbone = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights="DEFAULT")
+        
+        # get number of input features for the classifier
+        in_features = self.backbone.roi_heads.box_predictor.cls_score.in_features
+        
+        # replace the pre-trained head with a new one
+        self.backbone.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+            
+    def forward(images: torch.Tensor, targets: Dict[str, torch.Tensor]) -> torch.Tensor:
+        return self.encoder(images, targets)
         
 
 if __name__ == '__main__':

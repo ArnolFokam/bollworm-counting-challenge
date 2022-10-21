@@ -10,6 +10,7 @@ from argparse import Namespace
 import yaml
 import torch
 import wandb
+import torchvision
 import numpy as np
 import pandas as pd
 import torch.nn as nn
@@ -18,7 +19,7 @@ import torch.nn.functional as F
 from torch.utils.data import Subset, DataLoader
 from sklearn.model_selection import  KFold
 
-# from bow.model import Model
+from bow.model import InsectDetector
 from bow.dataset import WadhwaniBollwormDataset
 from bow.transform import BaselineTrainTransform
 from bow.helpers import seed_everything, get_dir, reset_wandb_env, generate_random_string
@@ -36,8 +37,6 @@ parser.add_argument(
     '-off', '--offline', help='should we run the experiments offline?', default=True, type=bool)
 parser.add_argument(
     '-s', '--seed', help='seed for experiments', default=42, type=int)
-parser.add_argument('-ts', '--test_size',
-                    help='test size for cross validation', default=0.17, type=float)
 parser.add_argument('-dv', '--device',
                     help='cuda device to use', default=0, type=int)
 parser.add_argument(
@@ -49,9 +48,7 @@ parser.add_argument('-ssp', '--sample_submission_path', help='path to the sample
 
 # data
 parser.add_argument('-d', '--data_dir',
-                    help='path to data folder', default='data/source', type=str)
-parser.add_argument('-dd', '--download_data',
-                    help='should we download the data?', default=False, type=bool)
+                    help='path to data folder', default='data/', type=str)
 parser.add_argument('-b', '--batch_size',
                     help='batch size', default=256, type=int)
 parser.add_argument('-w', '--num_workers',
@@ -78,53 +75,55 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s: %(message)s', datefmt='%H:%M:%S')
 
 
-def train_val_single_epoch(model, criterion, optimizer, scheduler, dataloader, device, phase):
-    if phase == 'train':
-        model.train()  # Set model to training mode
-    else:
-        model.eval()   # Set model to evaluate mode
-
-    running_loss = 0.0
-    running_preds = []
-    running_targets = []
-
+def train_val_one_epoch(model, optimizer,  lr_scheduler, data_loader, device, epoch, phase, scaler=None):
+    
     pbar = tqdm(dataloader)
     pbar.set_description(f"Phase {phase}")
-
-    # Iterate over data.
-    for image_ids, imgs, bboxes, targets in pbar:
-        field_ids = field_ids.to(device)
-        imgs = imgs.to(device)
-        bboxes = bboxes.to(device)
-        targets = targets.to(device)
-
-        # zero the parameter gradients
-        optimizer.zero_grad()
-
-        # forward
-        # track history if only in train
+    
+    for images, targets in pbar:
+        images = list(image.to(device) for image in images)
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        
         with torch.set_grad_enabled(phase == 'train'):
-            outputs = model(imgs, bboxes)
-            # preds = torch.argmax(F.softmax(outputs, 1), 1)
-            # loss = criterion(outputs, targets)
+            with torch.cuda.amp.autocast(enabled=scaler is not None):
+                loss_dict = model(images, targets)
+                losses = sum(loss for loss in loss_dict.values())
 
+            # reduce losses over all GPUs for logging purposes
+            loss_dict_reduced = utils.reduce_dict(loss_dict)
+            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+
+            loss_value = losses_reduced.item()
+
+            if not math.isfinite(loss_value):
+                print(f"Loss is {loss_value}, stopping training")
+                print(loss_dict_reduced)
+                sys.exit(1)
+                
             # backward + optimize only if in training phase
             if phase == 'train':
-                loss.backward()
-                optimizer.step()
-                scheduler.step()
+                if scaler is not None:
+                    scaler.scale(losses).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    losses.backward()
+                    optimizer.step()
 
-        # metrics
-        # running_loss += loss.item()
-        # running_targets.extend(targets.cpu().detach().numpy())
-        # running_preds.extend(preds.cpu().detach().numpy())
+                if lr_scheduler is not None:
+                    lr_scheduler.step()
 
-    return None # running_loss, running_preds, running_targets
+    return losses_reduced, optimizer.param_groups[0]["lr"]
+
 
 def train(model, criterion, learning_rate, dataloaders, device, num_epochs, kfold_idx, num_folds, logger):
+    params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.SGD(params, lr=learning_rate, momentum=0.9, weight_decay=0.0005)
     
-    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10*len(dataloaders['train']))
+    # lr scheduler
+    warmup_factor = 1.0 / 1000
+    warmup_iters = min(1000, len(data_loader) - 1)
+    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=warmup_factor, total_iters=warmup_iters)
         
     for epoch in range(num_epochs):
             print()
@@ -136,16 +135,24 @@ def train(model, criterion, learning_rate, dataloaders, device, num_epochs, kfol
             for phase in ['train', 'val']:
 
                 # running_loss, running_preds, running_targets = 
-                some_metrics = train_val_single_epoch(model,criterion, optimizer, scheduler, dataloaders[phase], device, phase)
-
+                loss, lr = train_val_one_epoch(model, optimizer, dataloaders[phase], device, epoch, phase)
+                # some_metrics = train_val_single_epoch(model,criterion, optimizer, scheduler, dataloaders[phase], device, phase)
+                
                 logging.info(
                     'Fold {}/{}: '
                     'Epoch {}/{}: '
-                    'Phase {}: '.format(kfold_idx + 1, num_folds,
+                    'Phase {}: '
+                    'Loss {}: '
+                    'LR {}: '.format(kfold_idx + 1, num_folds,
                                         epoch + 1, num_epochs,
-                                        phase))
+                                        phase,
+                                        loss, 
+                                        lr))
 
-                logger.log({"epoch": epoch + 1})
+                logger.log({"epoch": epoch + 1,
+                            "loss": loss,
+                            "lr": lr})
+                
                 
     return model
                 
@@ -174,22 +181,21 @@ def main():
 
     dataset = WadhwaniBollwormDataset(
         args.data_dir,
-        download=args.download_data,
         save=True,
         train=True,
         max_cache_length=args.max_cache_length,
-        transform=BaselineTrainTransform())
-    kfold =  KFold(n_splits=args.splits, test_size=args.test_size, random_state=args.seed)
+        transform=BaselineTrainTransform(train=True))
+    kfold =  KFold(n_splits=args.splits, random_state=args.seed, shuffle=True)
 
     # arrays of model from cross validation of each snapshots
     models = []
 
-    for kfold_idx, (train_indices, val_indices) in enumerate(kfold.split(dataset.field_ids, dataset.targets)):
+    for kfold_idx, (train_indices, val_indices) in enumerate(kfold.split(dataset.bboxes)):
 
         logging.info(
-            f'Fold {kfold_idx + 1} / {args.spits}: {len(train_indices)} trains, {len(val_indices)} vals')
+            f'Fold {kfold_idx + 1} / {args.splits}: {len(train_indices)} trains, {len(val_indices)} vals')
 
-        logging.info(f'Fold {kfold_idx + 1} / {args.spits}: Loading dataset')
+        logging.info(f'Fold {kfold_idx + 1} / {args.splits}: Loading dataset')
 
         train_ds = Subset(dataset, train_indices)
         val_ds = Subset(dataset, val_indices)
@@ -204,13 +210,13 @@ def main():
         }
 
         # model
-        logging.info(f'Fold {kfold_idx + 1} / {args.spits}: preparing model...')
-        # model = nn.Something
-        # model = model.to(device)
+        logging.info(f'Fold {kfold_idx + 1} / {args.splits}: preparing model...')
+        model = InsectDetector(num_classes=len(dataset.bollworms))
+        model = model.to(device)
 
         # loss function
-        logging.info(f'Fold {kfold_idx + 1} / {args.spits}: preparing loss function...')
-        # criterion = nn.CrossEntropyLoss()
+        logging.info(f'Fold {kfold_idx + 1} / {args.splits}: preparing loss function...')
+        criterion = None
         # criterion.to(device)
 
         # reset wandb env
@@ -228,7 +234,7 @@ def main():
         logging.info(f'Fold {kfold_idx + 1} / {args.splits}: getting model snapshots...')
         model = train(model, criterion, args.learning_rate, dataloaders, device, num_epochs=args.epochs, kfold_idx=kfold_idx, num_folds=args.splits, logger=run)
 
-        models.append(mdoel)
+        models.append(model)
 
         wandb.join()
 

@@ -109,12 +109,12 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
         
         # normalize the bounding boxes
         for i in range(len(bboxes)):
-            bboxes[i] = (
-                (bboxes[i][0] / original_width) * self.width, # min x
-                (bboxes[i][1] / original_width) * self.width, # max x
-                (bboxes[i][2] / original_height) * self.height, # min y
-                (bboxes[i][3] / original_height) * self.height # max y
-            )
+            xmin = (bboxes[i][0] / original_width) * self.width # min x
+            ymin = (bboxes[i][1] / original_height) * self.height # max x
+            xmax = (bboxes[i][2] / original_width) * self.width # min y
+            ymax = (bboxes[i][3] / original_height) * self.height # max y
+            
+            bboxes[i] = (xmin, ymin, xmax, ymax)
 
         bboxes = torch.as_tensor(bboxes, dtype=torch.float32)
         

@@ -57,12 +57,16 @@ parser.add_argument('-cs', '--crop_size',
                     help='size of the crop image after transform', default=32, type=int)
 parser.add_argument('-ml', '--max_cache_length',
                     help='max length of the cache of our data', default=512, type=int)
+parser.add_argument('-imw', '--image_width',
+                    help='width of an image', default=1024, type=int)
+parser.add_argument('-imh', '--image_height',
+                    help='height of an image', default=1024, type=int)
 
 # model optimization & training
 parser.add_argument('-ep', '--epochs',
                     help='number of training epochs', default=10, type=int)
 parser.add_argument('-lr', '--learning_rate',
-                    help='learning rate', default=0.1, type=float)
+                    help='learning rate', default=0.005, type=float)
 parser.add_argument(
     '-sp', '--sweep_path', help='path to sweep configuration if we wish to start a sweep', default=None, type=str)
 
@@ -182,6 +186,8 @@ def main():
         args.data_dir,
         save=True,
         train=True,
+        width=args.image_width,
+        height=args.image_height,
         max_cache_length=args.max_cache_length,
         transform=BaselineTrainTransform(train=True))
     kfold =  KFold(n_splits=args.splits, random_state=args.seed, shuffle=True)

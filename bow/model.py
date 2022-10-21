@@ -31,7 +31,7 @@ class InsectDetector(ModelMixin):
         # replace the pre-trained head with a new one
         self.backbone.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
             
-    def forward(images: torch.Tensor, targets: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, images: torch.Tensor, targets: Dict[str, torch.Tensor]) -> torch.Tensor:
         return self.encoder(images, targets)
         
 

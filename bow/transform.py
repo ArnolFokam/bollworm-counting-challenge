@@ -16,7 +16,7 @@ class BaselineTrainTransform:
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
     def __call__(self, image: Union[np.ndarray, Image], bboxes: List[float], class_labels: List[str]) -> Dict[str,  Union[List[float], Image]]:
-        transfromed = self.transform(image=image, bboxes=bboxes,  class_labels=class_labels)
+        transformed = self.transform(image=image, bboxes=bboxes,  class_labels=class_labels)
         transformed_class_labels = transformed['class_labels']
         transformed_image = transformed['image']
         transformed_bboxes = transformed['bboxes']

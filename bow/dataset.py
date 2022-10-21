@@ -120,13 +120,10 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
         
         if self.transform:
             image, bboxes, targets = self.transform(image=image, bboxes=bboxes, class_labels=targets)
-                
-            # bounding box
-            bboxes = torch.Tensor(bboxes)
         
         return image, {
-            "image_id": image_id,
-            "boxes": bboxes,
+            "image_id": torch.Tensor(image_id),
+            "boxes": torch.Tensor(bboxes),
             "labels": torch.as_tensor([int(self.class_meta[target]["loss_label"]) for target in targets], dtype=torch.int64) if self.train else torch.empty(len(targets))
         }
 

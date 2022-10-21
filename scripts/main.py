@@ -208,10 +208,12 @@ def main():
         dataloaders = {
             "train": DataLoader(train_ds,
                                 batch_size=args.batch_size,
-                                num_workers=args.num_workers),
+                                num_workers=args.num_workers,
+                                collate_fn=lambda x: tuple(zip(*x))),
             "val": DataLoader(val_ds,
                               batch_size=args.batch_size,
-                              num_workers=args.num_workers)
+                              num_workers=args.num_workers,
+                              collate_fn=lambda x: tuple(zip(*x)))
         }
 
         # model

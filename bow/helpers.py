@@ -10,6 +10,13 @@ import numpy as np
 import torch.distributed as dist
 
 
+def is_dist_avail_and_initialized():
+    if not dist.is_available():
+        return False
+    if not dist.is_initialized():
+        return False
+    return True
+
 def get_world_size():
     if not is_dist_avail_and_initialized():
         return 1
@@ -17,8 +24,6 @@ def get_world_size():
 
 def reduce_dict(input_dict, average=True):
     """
-    credits: https://github.com/pytorch/vision/blob/main/references/detection/utils.py
-    
     Args:
         input_dict (dict): all the values will be reduced
         average (bool): whether to do average or sum
@@ -41,7 +46,8 @@ def reduce_dict(input_dict, average=True):
         if average:
             values /= world_size
         reduced_dict = {k: v for k, v in zip(names, values)}
-    return 
+    return reduced_dict
+
 
 def seed_everything(seed):
     torch.manual_seed(seed)
@@ -92,7 +98,6 @@ def visualize_bbox(img, bbox, class_name, color=BOX_COLOR, thickness=2):
         lineType=cv2.LINE_AA,
     )
     return img
-
 
 def visualize(image, bboxes, category_ids, category_id_to_name):
     img = image.copy()

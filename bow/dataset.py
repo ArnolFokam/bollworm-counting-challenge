@@ -97,7 +97,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
         image_id, bboxes, targets = self.bboxes[index]
         image = np.array(self.__get_image_from_id(image_id))
         if self.transform:
-            image, bboxes = self.transform(image=image.astype(np.float32), bboxes=bboxes)
+            image, bboxes = self.transform(image=image.astype(np.float32), bboxes=bboxes, class_labels=targets)
             image = image.float()
         else:
             image = torch.FloatTensor(image)

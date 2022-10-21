@@ -15,7 +15,7 @@ class BaselineTrainTransform:
         if self.train:
             
             self.transform = A.Compose([
-                A.RandomCrop(width=450, height=450),
+                # A.RandomCrop(width=1024, height=1024),
                 A.HorizontalFlip(p=0.5),
                 A.RandomBrightnessContrast(p=0.2),
                 TorchT.ToTensorV2(p=1.0) ,

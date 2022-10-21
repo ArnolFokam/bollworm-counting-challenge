@@ -58,9 +58,9 @@ parser.add_argument('-cs', '--crop_size',
 parser.add_argument('-ml', '--max_cache_length',
                     help='max length of the cache of our data', default=512, type=int)
 parser.add_argument('-imw', '--image_width',
-                    help='width of an image', default=1024, type=int)
+                    help='width of an image', default=256, type=int)
 parser.add_argument('-imh', '--image_height',
-                    help='height of an image', default=1024, type=int)
+                    help='height of an image', default=256, type=int)
 
 # model optimization & training
 parser.add_argument('-ep', '--epochs',

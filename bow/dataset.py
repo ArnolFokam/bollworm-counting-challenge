@@ -81,8 +81,10 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                         if not pd.isnull(row['worm_type']):
                             tmp_targets.append(row['worm_type'])
                             tmp_bboxes.append(shapely.wkt.loads(row["geometry"]).bounds)
-            
-                    self.bboxes.append((name.split(".")[0].split("_")[-1], tmp_bboxes, tmp_targets))
+                    
+                    # TODO: next time, move to cases with no bounding boxes
+                    if len(tmp_bboxes) == len(tmp_bboxes) and len(tmp_bboxes) > 0 and len(tmp_targets) > 0:
+                        self.bboxes.append((name.split(".")[0].split("_")[-1], tmp_bboxes, tmp_targets))
             
             if save:
                 logging.info('Caching data for subsequent use...')

@@ -85,7 +85,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                     # TODO: next time, move to cases with no bounding boxes
                     if len(tmp_bboxes) == len(tmp_bboxes) and len(tmp_bboxes) > 0 and len(tmp_targets) > 0:
                         self.bboxes.append((name.split(".")[0].split("_")[-1], 
-                                            ame.split(".")[-1],
+                                            name.split(".")[-1],
                                             tmp_bboxes, tmp_targets))
             
             if save:

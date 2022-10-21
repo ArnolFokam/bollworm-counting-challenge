@@ -33,12 +33,19 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
     def __init__(
             self,
             root_dir: str,
+            width: int = 256,
+            height: int = 256,
             save: bool = True,
             train: bool = True,
             transform: Optional[Callable] = None,
             max_cache_length: int = 256):
         
         self.train = train
+        
+        # image size
+        self.width = width
+        self.height = height
+        
         self.root_dir = root_dir
         self.transform = transform
         self.max_cache_length = max_cache_length
@@ -96,20 +103,32 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
     def __getitem__(self, index: str):
         image_id, bboxes, targets = self.bboxes[index]
         
-        # bounding box
-        torch.as_tensor(boxes, dtype=torch.float32)
-        
         # image
-        image = self.__get_image_from_id(image_id)
+        image, original_height, original_width = self.__get_image_from_id(image_id)
         image /= 255.0
+        
+        # normalize the bounding boxes
+        for i in range(len(bboxes)):
+            bboxes[i] = (
+                (bboxes[i][0] / original_width) * self.width, # min x
+                (bboxes[i][1] / original_width) * self.width, # max x
+                (bboxes[i][2] / original_height) * self.height, # min y
+                (bboxes[i][3] / original_height) * self.height # max y
+            )
+
+        bboxes = torch.as_tensor(bboxes, dtype=torch.float32)
         
         if self.transform:
             image, bboxes, targets = self.transform(image=image, bboxes=bboxes, class_labels=targets)
-        
+                
             # bounding box
             bboxes = torch.Tensor(bboxes)
         
-        return image_id, image, bboxes, torch.as_tensor([int(self.class_meta[target]["loss_label"]) for target in targets], dtype=torch.int64) if self.train else torch.empty(len(targets))
+        return image, {
+            "image_id": image_id,
+            "boxes": bboxes,
+            "labels": torch.as_tensor([int(self.class_meta[target]["loss_label"]) for target in targets], dtype=torch.int64) if self.train else torch.empty(len(targets))
+        }
 
     @staticmethod
     def get_class_weights(targets):
@@ -134,7 +153,9 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
             return self.cache[image_id]
         else:
             image = cv2.imread(f"{self.root_dir}/{self.images_path}/id_{image_id}.jpg")
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+            img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+            
+            original_height, original_width = img_rgb.shape[:2]
             img_res = cv2.resize(img_rgb, (self.width, self.height), cv2.INTER_AREA)
                 
             # if max cache length attain, remnove one random element
@@ -142,7 +163,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                 del self.cache[random.choice(self.cache.keys())]
                 
             # insert next element
-            self.cache[image_id] = img_res
+            self.cache[image_id] = img_res, original_height, original_width
             return self.cache[image_id]
 
 

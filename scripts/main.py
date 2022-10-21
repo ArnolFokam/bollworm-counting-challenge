@@ -16,13 +16,13 @@ import pandas as pd
 import torch.nn as nn
 from tqdm import tqdm
 import torch.nn.functional as F
-from torch.utils.data import Subset, DataLoader
 from sklearn.model_selection import  KFold
+from torch.utils.data import Subset, DataLoader
 
 from bow.model import InsectDetector
 from bow.dataset import WadhwaniBollwormDataset
 from bow.transform import BaselineTrainTransform
-from bow.helpers import seed_everything, get_dir, reset_wandb_env, generate_random_string
+from bow.helpers import seed_everything, get_dir, reset_wandb_env, generate_random_string, reduce_dict
 
 parser = argparse.ArgumentParser(description='Ensemble training script')
 
@@ -75,7 +75,7 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s: %(message)s', datefmt='%H:%M:%S')
 
 
-def train_val_one_epoch(model, optimizer,  lr_scheduler, data_loader, device, epoch, phase, scaler=None):
+def train_val_one_epoch(model, optimizer,  lr_scheduler, dataloader, device, epoch, phase, scaler=None):
     
     pbar = tqdm(dataloader)
     pbar.set_description(f"Phase {phase}")
@@ -90,7 +90,7 @@ def train_val_one_epoch(model, optimizer,  lr_scheduler, data_loader, device, ep
                 losses = sum(loss for loss in loss_dict.values())
 
             # reduce losses over all GPUs for logging purposes
-            loss_dict_reduced = utils.reduce_dict(loss_dict)
+            loss_dict_reduced = reduce_dict(loss_dict)
             losses_reduced = sum(loss for loss in loss_dict_reduced.values())
 
             loss_value = losses_reduced.item()
@@ -122,20 +122,19 @@ def train(model, criterion, learning_rate, dataloaders, device, num_epochs, kfol
     
     # lr scheduler
     warmup_factor = 1.0 / 1000
-    warmup_iters = min(1000, len(data_loader) - 1)
+    warmup_iters = min(1000, len(dataloaders["train"]) - 1)
     lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=warmup_factor, total_iters=warmup_iters)
         
     for epoch in range(num_epochs):
             print()
-            logging.info('Fold {}: Epoch {}/{}'.format(kfold_idx +
-                         1,  epoch + 1, num_epochs))
+            logging.info('Fold {}: Epoch {}/{}'.format(kfold_idx + 1,  epoch + 1, num_epochs))
             print('-' * 20)
 
             # Each epoch has a training and validation phase
             for phase in ['train', 'val']:
 
                 # running_loss, running_preds, running_targets = 
-                loss, lr = train_val_one_epoch(model, optimizer, dataloaders[phase], device, epoch, phase)
+                loss, lr = train_val_one_epoch(model, optimizer, lr_scheduler, dataloaders[phase], device, epoch, phase)
                 # some_metrics = train_val_single_epoch(model,criterion, optimizer, scheduler, dataloaders[phase], device, phase)
                 
                 logging.info(

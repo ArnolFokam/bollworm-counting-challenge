@@ -1,4 +1,5 @@
 import os
+import sys
 import math
 import copy
 import time
@@ -17,7 +18,7 @@ import pandas as pd
 import torch.nn as nn
 from tqdm import tqdm
 import torch.nn.functional as F
-from sklearn.model_selection import  KFold
+from sklearn.model_selection import KFold
 from torch.utils.data import Subset, DataLoader
 
 from bow.model import InsectDetector
@@ -67,7 +68,7 @@ parser.add_argument('-imh', '--image_height',
 parser.add_argument('-ep', '--epochs',
                     help='number of training epochs', default=10, type=int)
 parser.add_argument('-lr', '--learning_rate',
-                    help='learning rate', default=0.005, type=float)
+                    help='learning rate', default=0.0005, type=float)
 parser.add_argument(
     '-sp', '--sweep_path', help='path to sweep configuration if we wish to start a sweep', default=None, type=str)
 
@@ -81,14 +82,14 @@ logging.basicConfig(level=logging.INFO,
 
 
 def train_val_one_epoch(model, optimizer,  lr_scheduler, dataloader, device, epoch, phase, scaler=None):
-    
+
     pbar = tqdm(dataloader)
     pbar.set_description(f"Phase {phase}")
-    
+
     for images, targets in pbar:
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-        
+
         with torch.set_grad_enabled(phase == 'train'):
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 loss_dict = model(images, targets)
@@ -104,7 +105,7 @@ def train_val_one_epoch(model, optimizer,  lr_scheduler, dataloader, device, epo
                 print(f"Loss is {loss_value}, stopping training")
                 print(loss_dict_reduced)
                 sys.exit(1)
-                
+
             # backward + optimize only if in training phase
             if phase == 'train':
                 if scaler is not None:
@@ -180,8 +181,7 @@ def main():
     logging.info(f'Preparing dataset...')
 
     seed_everything(args.seed)
-    device = torch.device(
-        f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     dataset = WadhwaniBollwormDataset(
         args.data_dir,

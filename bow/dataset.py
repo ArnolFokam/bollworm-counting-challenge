@@ -1,7 +1,5 @@
-import glob
 import logging
-import math
-import os
+import random
 import pickle
 from collections import defaultdict
 from typing import Callable, List, Optional
@@ -24,7 +22,7 @@ logging.basicConfig(level=logging.INFO,
 
 class WadhwaniBollwormDataset(torch.utils.data.Dataset):
     
-    bbox_path = "images_bboxes_uncorrupted.csv"
+    bbox_path = "images_bboxes.csv"
     images_path = "images"
     
     bollworms = ["abw", "pbw"]
@@ -164,7 +162,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                 
             # if max cache length attain, remnove one random element
             if len(self.cache.keys()) >= self.max_cache_length:
-                del self.cache[random.choice(self.cache.keys())]
+                del self.cache[random.choice(list(self.cache.keys()))]
                 
             # insert next element
             self.cache[image_id] = img_res, original_height, original_width

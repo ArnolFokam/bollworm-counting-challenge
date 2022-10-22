@@ -23,7 +23,7 @@ class ModelMixin(nn.Module):
 class InsectDetector(ModelMixin):
     def __init__(self, num_classes):
         super().__init__()
-        self.backbone = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_320_fpn(weights="DEFAULT")
+        self.backbone = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights="DEFAULT")
         
         # get number of input features for the classifier
         in_features = self.backbone.roi_heads.box_predictor.cls_score.in_features

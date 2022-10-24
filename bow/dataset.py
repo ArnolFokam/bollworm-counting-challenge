@@ -1,8 +1,7 @@
 import logging
 import random
 import pickle
-from collections import defaultdict
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import cv2
 import numpy as np
@@ -78,7 +77,9 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                     for _, row in bboxes.iterrows():
                         if not pd.isnull(row['worm_type']):
                             tmp_targets.append(row['worm_type'])
-                            tmp_bboxes.append(shapely.wkt.loads(row["geometry"]).bounds)
+                            # image_height, image_width = cv2.imread(f"{self.root_dir}/{self.images_path}/{row['image_id']}").shape[:2]
+                            xmin, ymin, xmax, ymax = shapely.wkt.loads(row["geometry"]).bounds
+                            tmp_bboxes.append((xmin, ymin, xmax, ymax))
                     
                     # TODO: next time, move to cases with no bounding boxes
                     if len(tmp_bboxes) == len(tmp_bboxes) and len(tmp_bboxes) > 0 and len(tmp_targets) > 0:

@@ -38,10 +38,10 @@ class InsectDetector(ModelMixin):
 if __name__ == '__main__':
     ds = WadhwaniBollwormDataset('data', transform=BaselineTrainTransform())
     
-    loader = torch.utils.data.DataLoader(ds, batch_size=20, shuffle=False)
+    loader = torch.utils.data.DataLoader(ds, batch_size=20, shuffle=False, collate_fn=lambda x: tuple(zip(*x)))
     loader = iter(loader)
-    ids, imgs, bboxes, targets = next(loader) 
+    imgs, targets = next(loader) 
     
     # modelling
-    model = InsectDetector()
-    out = model(imgs, masks)   
+    model = InsectDetector(num_classes=len(ds.bollworms))
+    out = model(imgs, targets)   

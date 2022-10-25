@@ -76,12 +76,16 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                     tmp_bboxes = []
                     for _, row in bboxes.iterrows():
                         if not pd.isnull(row['worm_type']):
-                            tmp_targets.append(row['worm_type'])
-                            # image_height, image_width = cv2.imread(f"{self.root_dir}/{self.images_path}/{row['image_id']}").shape[:2]
                             xmin, ymin, xmax, ymax = shapely.wkt.loads(row["geometry"]).bounds
-                            tmp_bboxes.append((xmin, ymin, xmax, ymax))
-                    
-                    # TODO: next time, move to cases with no bounding boxes
+                            xmin, ymin, xmax, ymax = np.array((xmin, ymin, xmax, ymax)).astype(np.int32)
+                            im_height, im_width = Image.open(f'{self.root_dir}/{self.images_path}/{row["image_id"]}').size
+                            xmin, xmax = np.clip([xmin, xmax], 0, im_width - 1)
+                            ymin, ymax = np.clip([ymin, ymax], 0, im_height - 1)
+                            
+                            if (xmax - xmin) > 0 and (ymax - ymin) > 0:
+                                tmp_targets.append(row['worm_type'])
+                                tmp_bboxes.append((xmin, ymin, xmax, ymax))
+                            
                     if len(tmp_bboxes) == len(tmp_bboxes) and len(tmp_bboxes) > 0 and len(tmp_targets) > 0:
                         self.bboxes.append((name.split(".")[0].split("_")[-1], 
                                             name.split(".")[-1],
@@ -99,7 +103,6 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
         # save cache for our load on the fly algorithm
         self.cache = {}
 
-        
     def __len__(self):
         return len(self.bboxes)
 
@@ -128,7 +131,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
         
         # TODO: image id
         return image, {
-            "image_id": torch.Tensor(index),
+            "image_id": torch.tensor(index),
             "boxes": torch.Tensor(bboxes),
             "labels": torch.as_tensor([int(self.class_meta[target]["loss_label"]) for target in targets], dtype=torch.int64) if self.train else torch.empty(len(targets))
         }
@@ -155,11 +158,11 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
             # if image in cache, return the image
             return self.cache[image_id]
         else:
-            image = cv2.imread(f"{self.root_dir}/{self.images_path}/id_{image_id}.{ext}")
-            img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+            image = Image.open(f"{self.root_dir}/{self.images_path}/id_{image_id}.{ext}")
             
-            original_height, original_width = img_rgb.shape[:2]
-            img_res = cv2.resize(img_rgb, (self.width, self.height), cv2.INTER_AREA)
+            original_height, original_width = image.size
+            img_res = image.resize((self.width, self.height),  Image.ANTIALIAS)
+            img_res = np.array(img_res).astype(np.float32)
                 
             # if max cache length attain, remnove one random element
             if len(self.cache.keys()) >= self.max_cache_length:
@@ -171,4 +174,4 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
 
 
 if __name__ == '__main__':
-    ds = WadhwaniBollwormDataset('data/', train=True)
+    ds = WadhwaniBollwormDataset('data/', train=True, save=False)

@@ -122,7 +122,7 @@ def train_val_one_epoch(model, optimizer,  lr_scheduler, dataloader, device, epo
     return losses_reduced, optimizer.param_groups[0]["lr"]
 
 
-def train(model, criterion, learning_rate, dataloaders, device, num_epochs, kfold_idx, num_folds, logger):
+def train(model, learning_rate, dataloaders, device, num_epochs, kfold_idx, num_folds, logger):
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=learning_rate, momentum=0.9, weight_decay=0.0005)
     
@@ -224,7 +224,7 @@ def main():
 
         # loss function
         logging.info(f'Fold {kfold_idx + 1} / {args.splits}: preparing loss function...')
-        criterion = None
+        # criterion = None
         # criterion.to(device)
 
         # reset wandb env
@@ -240,7 +240,7 @@ def main():
 
         # get a snapshot of model for this k fold
         logging.info(f'Fold {kfold_idx + 1} / {args.splits}: getting model snapshots...')
-        model = train(model, criterion, args.learning_rate, dataloaders, device, num_epochs=args.epochs, kfold_idx=kfold_idx, num_folds=args.splits, logger=run)
+        model = train(model, args.learning_rate, dataloaders, device, num_epochs=args.epochs, kfold_idx=kfold_idx, num_folds=args.splits, logger=run)
 
         models.append(model)
 

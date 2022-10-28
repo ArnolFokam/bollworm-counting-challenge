@@ -1,9 +1,3 @@
-import os
-import sys
-import math
-import copy
-import time
-import pickle
 import logging
 import argparse
 import datetime
@@ -12,17 +6,13 @@ from argparse import Namespace
 import yaml
 import torch
 import wandb
-import torchvision
-import numpy as np
-import pandas as pd
 import torch.nn as nn
-from tqdm import tqdm
-import torch.nn.functional as F
 from sklearn.model_selection import KFold
 from torch.utils.data import Subset, DataLoader
 
-from bow.model import InsectDetector
+from bow.model import ImageClassifier, InsectDetector
 from bow.dataset import WadhwaniBollwormDataset
+from bow.trainer import train_classifier, train_object_detector
 from bow.transform import BaselineTrainTransform
 from bow.helpers import seed_everything, get_dir, reset_wandb_env, generate_random_string, reduce_dict
 
@@ -34,7 +24,9 @@ parser.add_argument('-o', '--output_dir',
 
 # experiment
 parser.add_argument(
-    '-n', '--name', help='name of experiment', default="agrifield-challenge", type=str)
+    '-n', '--name', help='name of experiment', default="bollworm-challenge", type=str)
+parser.add_argument(
+    '-doj', '--do_object_detection', help='train object detection models?', default=True, type=bool)
 parser.add_argument(
     '-off', '--offline', help='should we run the experiments offline?', default=True, type=bool)
 parser.add_argument(
@@ -78,183 +70,202 @@ initial_args = parser.parse_args()
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s: %(message)s', datefmt='%H:%M:%S')
 
-
-def train_val_one_epoch(model, optimizer,  lr_scheduler, dataloader, device, epoch, phase, scaler=None):
-
-    pbar = tqdm(dataloader)
-    pbar.set_description(f"Phase {phase}")
-
-    for images, targets in pbar:
-        images = list(image.to(device) for image in images)
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-
-        with torch.set_grad_enabled(phase == 'train'):
-            with torch.cuda.amp.autocast(enabled=scaler is not None):
-                loss_dict = model(images, targets)
-                losses = sum(loss for loss in loss_dict.values())
-
-            # reduce losses over all GPUs for logging purposes
-            loss_dict_reduced = reduce_dict(loss_dict)
-            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-
-            loss_value = losses_reduced.item()
-
-            if not math.isfinite(loss_value):
-                print(f"Loss is {loss_value}, stopping training")
-                print(loss_dict_reduced)
-                sys.exit(1)
-
-            # backward + optimize only if in training phase
-            if phase == 'train':
-                if scaler is not None:
-                    scaler.scale(losses).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    losses.backward()
-                    optimizer.step()
-
-                if lr_scheduler is not None:
-                    lr_scheduler.step()
-
-    return losses_reduced, optimizer.param_groups[0]["lr"]
-
-
-def train(model, learning_rate, dataloaders, device, num_epochs, kfold_idx, num_folds, logger):
-    params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=learning_rate, momentum=0.9, weight_decay=0.0005)
-    
-    # lr scheduler
-    warmup_factor = 1.0 / 1000
-    warmup_iters = min(1000, len(dataloaders["train"]) - 1)
-    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=warmup_factor, total_iters=warmup_iters)
-        
-    for epoch in range(num_epochs):
-            print()
-            logging.info('Fold {}: Epoch {}/{}'.format(kfold_idx + 1,  epoch + 1, num_epochs))
-            print('-' * 20)
-
-            # Each epoch has a training and validation phase
-            for phase in ['train', 'val']:
-
-                # running_loss, running_preds, running_targets = 
-                loss, lr = train_val_one_epoch(model, optimizer, lr_scheduler, dataloaders[phase], device, epoch, phase)
-                # some_metrics = train_val_single_epoch(model,criterion, optimizer, scheduler, dataloaders[phase], device, phase)
-                
-                logging.info(
-                    'Fold {}/{}: '
-                    'Epoch {}/{}: '
-                    'Phase {}: '
-                    'Loss {}: '
-                    'LR {}: '.format(kfold_idx + 1, num_folds,
-                                        epoch + 1, num_epochs,
-                                        phase,
-                                        loss, 
-                                        lr))
-
-                logger.log({"epoch": epoch + 1,
-                            "loss": loss,
-                            "lr": lr})
-                
-                
-    return model
                 
                 
 def main():
-    sweep_run_name = f"{datetime.datetime.now().strftime(f'%H-%M-%ST%d-%m-%Y')}_{generate_random_string(5)}"
+    if initial_args.do_object_detection:
+        sweep_run_name = f"{datetime.datetime.now().strftime(f'%H-%M-%ST%d-%m-%Y')}_{generate_random_string(5)}"
 
-    # directory to save models and parameters
-    results_dir = get_dir(f'{initial_args.output_dir}/{sweep_run_name}')
+        # directory to save models and parameters
+        results_dir = get_dir(f'{initial_args.output_dir}/od/{sweep_run_name}')
 
-    # combine wwandb config with args to form old args (sweep)
-    # dumb init to get configs
-    wandb.init(dir=get_dir(initial_args.output_dir))
-    args = Namespace(**(vars(initial_args) | dict(wandb.config)))
-    wandb.join()
-
-    # save hyperparameters
-    with open(f'{results_dir}/hparams.yaml', 'w') as f:
-        yaml.dump(args.__dict__, f)
-
-    logging.info(f'Preparing dataset...')
-
-    seed_everything(args.seed)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    dataset = WadhwaniBollwormDataset(
-        args.data_dir,
-        save=True,
-        train=True,
-        width=args.image_width,
-        height=args.image_height,
-        max_cache_length=args.max_cache_length,
-        transform=BaselineTrainTransform(train=True))
-    kfold =  KFold(n_splits=args.splits, random_state=args.seed, shuffle=True)
-
-    # arrays of model from cross validation of each snapshots
-    models = []
-
-    for kfold_idx, (train_indices, val_indices) in enumerate(kfold.split(dataset.bboxes)):
-
-        logging.info(
-            f'Fold {kfold_idx + 1} / {args.splits}: {len(train_indices)} trains, {len(val_indices)} vals')
-
-        logging.info(f'Fold {kfold_idx + 1} / {args.splits}: Loading dataset')
-
-        train_ds = Subset(dataset, train_indices)
-        val_ds = Subset(dataset, val_indices)
-
-        dataloaders = {
-            "train": DataLoader(train_ds,
-                                batch_size=args.batch_size,
-                                num_workers=args.num_workers,
-                                collate_fn=lambda x: tuple(zip(*x))),
-            "val": DataLoader(val_ds,
-                              batch_size=args.batch_size,
-                              num_workers=args.num_workers,
-                              collate_fn=lambda x: tuple(zip(*x)))
-        }
-
-        # model
-        logging.info(f'Fold {kfold_idx + 1} / {args.splits}: preparing model...')
-        model = InsectDetector(num_classes=len(dataset.bollworms))
-        model = model.to(device)
-
-        # loss function
-        logging.info(f'Fold {kfold_idx + 1} / {args.splits}: preparing loss function...')
-        # criterion = None
-        # criterion.to(device)
-
-        # reset wandb env
-        reset_wandb_env()
-
-        # wandb configs
-        run = wandb.init(project=args.name,
-                         name=f'kfold_{kfold_idx + 1}',
-                         group=sweep_run_name,
-                         dir=get_dir(args.output_dir),
-                         config=args,
-                         reinit=True)
-
-        # get a snapshot of model for this k fold
-        logging.info(f'Fold {kfold_idx + 1} / {args.splits}: getting model snapshots...')
-        model = train(model, args.learning_rate, dataloaders, device, num_epochs=args.epochs, kfold_idx=kfold_idx, num_folds=args.splits, logger=run)
-
-        models.append(model)
-
+        # combine wwandb config with args to form old args (sweep)
+        # dumb init to get configs
+        wandb.init(dir=get_dir(initial_args.output_dir))
+        args = Namespace(**(vars(initial_args) | dict(wandb.config)))
         wandb.join()
 
-    sweep_run = wandb.init(project=f"{args.name}-sweeps",
-                           name=sweep_run_name,
-                           config=args,
-                           dir=get_dir(args.output_dir))
+        # save hyperparameters
+        with open(f'{results_dir}/hparams.yaml', 'w') as f:
+            yaml.dump(args.__dict__, f)
 
-    sweep_run.log({})
-    wandb.join()
+        logging.info(f'Preparing dataset...')
 
-    # save models
-    for i, m in enumerate(models):
-        torch.save(m.state_dict(), f"{results_dir}/model_{i}.pth")
+        seed_everything(args.seed)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        dataset = WadhwaniBollwormDataset(
+            args.data_dir,
+            "object_detection",
+            save=True,
+            train=True,
+            width=args.image_width,
+            height=args.image_height,
+            max_cache_length=args.max_cache_length,
+            transform=BaselineTrainTransform(train=True))
+        kfold =  KFold(n_splits=args.splits, random_state=args.seed, shuffle=True)
+
+        # arrays of model from cross validation of each snapshots
+        models = []
+
+        for kfold_idx, (train_indices, val_indices) in enumerate(kfold.split(dataset.bboxes)):
+
+            logging.info(
+                f'Fold {kfold_idx + 1} / {args.splits}: {len(train_indices)} trains, {len(val_indices)} vals')
+
+            logging.info(f'Fold {kfold_idx + 1} / {args.splits}: Loading dataset')
+
+            train_ds = Subset(dataset, train_indices)
+            val_ds = Subset(dataset, val_indices)
+
+            dataloaders = {
+                "train": DataLoader(train_ds,
+                                    batch_size=args.batch_size,
+                                    num_workers=args.num_workers,
+                                    collate_fn=lambda x: tuple(zip(*x))),
+                "val": DataLoader(val_ds,
+                                batch_size=args.batch_size,
+                                num_workers=args.num_workers,
+                                collate_fn=lambda x: tuple(zip(*x)))
+            }
+
+            # model
+            logging.info(f'Fold {kfold_idx + 1} / {args.splits}: preparing model...')
+            model = InsectDetector(num_classes=len(dataset.bollworms))
+            model = model.to(device)
+
+            # loss function
+            logging.info(f'Fold {kfold_idx + 1} / {args.splits}: preparing loss function...')
+            # criterion = None
+            # criterion.to(device)
+
+            # reset wandb env
+            reset_wandb_env()
+
+            # wandb configs
+            run = wandb.init(project=args.name,
+                            name=f'kfold_{kfold_idx + 1}',
+                            group=sweep_run_name,
+                            dir=get_dir(args.output_dir),
+                            config=args,
+                            reinit=True)
+
+            # get a snapshot of model for this k fold
+            logging.info(f'Fold {kfold_idx + 1} / {args.splits}: getting model snapshots...')
+            model = train_object_detector(model, args.learning_rate, dataloaders, device, num_epochs=args.epochs, kfold_idx=kfold_idx, num_folds=args.splits, logger=run)
+
+            models.append(model)
+
+            wandb.join()
+
+        sweep_run = wandb.init(project=f"{args.name}-sweeps",
+                            name=sweep_run_name,
+                            config=args,
+                            dir=get_dir(args.output_dir))
+
+        sweep_run.log({})
+        wandb.join()
+
+        # save models
+        for i, m in enumerate(models):
+            torch.save(m.state_dict(), f"{results_dir}/model_{i}.pth")
+            
+    if initial_args.do_image_classification:
+        sweep_run_name = f"{datetime.datetime.now().strftime(f'%H-%M-%ST%d-%m-%Y')}_{generate_random_string(5)}"
+
+        # directory to save models and parameters
+        results_dir = get_dir(f'{initial_args.output_dir}/ic/{sweep_run_name}')
+
+        # combine wwandb config with args to form old args (sweep)
+        # dumb init to get configs
+        wandb.init(dir=get_dir(initial_args.output_dir))
+        args = Namespace(**(vars(initial_args) | dict(wandb.config)))
+        wandb.join()
+
+        # save hyperparameters
+        with open(f'{results_dir}/hparams.yaml', 'w') as f:
+            yaml.dump(args.__dict__, f)
+
+        logging.info(f'Preparing dataset...')
+
+        seed_everything(args.seed)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        dataset = WadhwaniBollwormDataset(
+            args.data_dir,
+            "classification",
+            save=True,
+            train=True,
+            width=args.image_width,
+            height=args.image_height,
+            max_cache_length=args.max_cache_length,
+            transform=BaselineTrainTransform(train=True))
+        kfold =  KFold(n_splits=args.splits, random_state=args.seed, shuffle=True)
+
+        # arrays of model from cross validation of each snapshots
+        models = []
+
+        for kfold_idx, (train_indices, val_indices) in enumerate(kfold.split(dataset.bboxes)):
+
+            logging.info(
+                f'Fold {kfold_idx + 1} / {args.splits}: {len(train_indices)} trains, {len(val_indices)} vals')
+
+            logging.info(f'Fold {kfold_idx + 1} / {args.splits}: Loading dataset')
+
+            train_ds = Subset(dataset, train_indices)
+            val_ds = Subset(dataset, val_indices)
+
+            dataloaders = {
+                "train": DataLoader(train_ds,
+                                    batch_size=args.batch_size,
+                                    num_workers=args.num_workers,
+                                    collate_fn=lambda x: tuple(zip(*x))),
+                "val": DataLoader(val_ds,
+                                batch_size=args.batch_size,
+                                num_workers=args.num_workers,
+                                collate_fn=lambda x: tuple(zip(*x)))
+            }
+
+            # model
+            logging.info(f'Fold {kfold_idx + 1} / {args.splits}: preparing model...')
+            model = ImageClassifier(num_classes=len(dataset.classes))
+            model = model.to(device)
+
+            # loss function
+            logging.info(f'Fold {kfold_idx + 1} / {args.splits}: preparing loss function...')
+            criterion = nn.CrossEntropyLoss()
+            criterion.to(device)
+
+            # reset wandb env
+            reset_wandb_env()
+
+            # wandb configs
+            run = wandb.init(project=args.name,
+                            name=f'kfold_{kfold_idx + 1}',
+                            group=sweep_run_name,
+                            dir=get_dir(args.output_dir),
+                            config=args,
+                            reinit=True)
+
+            # get a snapshot of model for this k fold
+            logging.info(f'Fold {kfold_idx + 1} / {args.splits}: getting model snapshots...')
+            model = train_classifier(model, args.learning_rate, dataloaders, device, num_epochs=args.epochs, kfold_idx=kfold_idx, num_folds=args.splits, logger=run)
+
+            models.append(model)
+
+            wandb.join()
+
+        sweep_run = wandb.init(project=f"{args.name}-sweeps",
+                            name=sweep_run_name,
+                            config=args,
+                            dir=get_dir(args.output_dir))
+
+        sweep_run.log({})
+        wandb.join()
+
+        # save models
+        for i, m in enumerate(models):
+            torch.save(m.state_dict(), f"{results_dir}/model_{i}.pth")
         
 if __name__ == "__main__":
     if initial_args.sweep_path:

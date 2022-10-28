@@ -20,7 +20,30 @@ class ModelMixin(nn.Module):
             if module.bias is not None:
                 module.bias.data.zero_()
 
+class ImageClassifier(ModelMixin):
+    def __init__(self, num_classes):
+        super().__init__()
+    
+        # load a pre-trained model for classification and return
+        # only the features
+        self.backbone = torchvision.models.mobilenet_v2(weights="DEFAULT").features
+        # backbone = torchvision.models.swin_t(weights="DEFAULT").features
 
+        # FasterRCNN needs to know the number of
+        # output channels in a backbone. For mobilenet_v2, it's 1280
+        # so we need to add it here
+        self.backbone.out_channels = 1280
+        
+        self.fc1= nn.Linear(self.backbone.out_channels, 128)
+        self.fc2 = nn.Linear(128, num_classes)
+    
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
+        out = self.backbone(images)
+        out = self.fc1(out)
+        out = self.fc2(out)
+        return out
+    
+    
 class InsectDetector(ModelMixin):
     def __init__(self, num_classes):
         super().__init__()

@@ -25,11 +25,13 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
     images_path = "images"
     
     bollworms = ["abw", "pbw"]
+    classes = ["insects", "no_insects"]
 
 
     def __init__(
             self,
             root_dir: str,
+            task: str,
             width: int = 256,
             height: int = 256,
             save: bool = True,
@@ -42,6 +44,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
         # image size
         self.width = width
         self.height = height
+        self.task = task
         
         self.root_dir = root_dir
         self.transform = transform
@@ -85,7 +88,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                             if (xmax - xmin) > 0 and (ymax - ymin) > 0:
                                 tmp_targets.append(row['worm_type'])
                                 tmp_bboxes.append((xmin, ymin, xmax, ymax))
-                            
+
                     if len(tmp_bboxes) == len(tmp_bboxes) and len(tmp_bboxes) > 0 and len(tmp_targets) > 0:
                         self.bboxes.append((name.split(".")[0].split("_")[-1], 
                                             name.split(".")[-1],

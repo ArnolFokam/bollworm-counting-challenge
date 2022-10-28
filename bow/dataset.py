@@ -86,6 +86,7 @@ class WadhwaniBollwormDataset(torch.utils.data.Dataset):
                             ymin, ymax = np.clip([ymin, ymax], 0, im_height - 1)
                             
                             if (xmax - xmin) > 0 and (ymax - ymin) > 0:
+                                # TODO: filter also a certain min width and aspect ratio if you want
                                 tmp_targets.append(row['worm_type'])
                                 tmp_bboxes.append((xmin, ymin, xmax, ymax))
 
